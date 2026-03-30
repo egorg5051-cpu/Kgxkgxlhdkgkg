@@ -11,6 +11,9 @@ load_dotenv()
 bot = Bot(token=os.getenv("BOT_TOKEN"))
 dp = Dispatcher(bot)
 
+# СОЗДАЕМ ОТДЕЛЬНЫЙ СЛОВАРЬ ДЛЯ ВРЕМЕННЫХ ДАННЫХ (ВМЕСТО dp.data)
+temp_storage = {}
+
 # Получаем ID администраторов из .env
 ADMIN_IDS = [int(id.strip()) for id in os.getenv("ADMIN_IDS", "").split(",") if id.strip()]
 WEB_APP_URL = os.getenv("WEB_APP_URL", "https://твой-сайт.com")
@@ -206,10 +209,16 @@ async def admin_buttons(message: types.Message):
             parse_mode="Markdown",
             reply_markup=get_admin_keyboard()
         )
-        # Устанавливаем состояние ожидания рассылки
-        dp.data['waiting_for_broadcast'] = message.from_user.id
+        # Устанавливаем состояние ожидания рассылки в temp_storage
+        temp_storage['waiting_for_broadcast'] = message.from_user.id
     
     elif message.text == "🔙 Выйти из админ-панели":
+        # Очищаем временные данные
+        if 'waiting_for_broadcast' in temp_storage:
+            del temp_storage['waiting_for_broadcast']
+        if 'broadcast_content' in temp_storage:
+            del temp_storage['broadcast_content']
+        
         await message.answer(
             "🔙 Вы вышли из админ-панели",
             reply_markup=types.ReplyKeyboardRemove()
@@ -220,7 +229,7 @@ async def admin_buttons(message: types.Message):
 @dp.message_handler(content_types=['photo', 'text'])
 async def handle_broadcast(message: types.Message):
     # Проверяем, ожидает ли админ рассылку
-    if dp.data.get('waiting_for_broadcast') != message.from_user.id:
+    if temp_storage.get('waiting_for_broadcast') != message.from_user.id:
         return
     
     # Проверяем, админ ли пользователь
@@ -238,8 +247,8 @@ async def handle_broadcast(message: types.Message):
         broadcast_content['type'] = 'text'
         broadcast_content['text'] = message.text
     
-    # Сохраняем в dp.data
-    dp.data['broadcast_content'] = broadcast_content
+    # Сохраняем в temp_storage
+    temp_storage['broadcast_content'] = broadcast_content
     
     # Показываем превью с inline-кнопками подтверждения
     keyboard = InlineKeyboardMarkup()
@@ -276,7 +285,7 @@ async def handle_broadcast(message: types.Message):
         )
     
     # Удаляем состояние ожидания
-    del dp.data['waiting_for_broadcast']
+    del temp_storage['waiting_for_broadcast']
 
 # Обработка подтверждения рассылки
 @dp.callback_query_handler(lambda call: call.data in ['confirm_broadcast', 'cancel_broadcast'])
@@ -298,7 +307,7 @@ async def broadcast_confirmation(call: types.CallbackQuery):
     users = cursor.fetchall()
     conn.close()
     
-    broadcast_content = dp.data.get('broadcast_content')
+    broadcast_content = temp_storage.get('broadcast_content')
     if not broadcast_content:
         await call.message.edit_text("❌ Ошибка: контент для рассылки не найден")
         return
@@ -315,13 +324,13 @@ async def broadcast_confirmation(call: types.CallbackQuery):
                     user[0],
                     broadcast_content['photo'],
                     caption=broadcast_content['caption'],
-                    reply_markup=go_button  # Только кнопка GO под сообщением
+                    reply_markup=go_button
                 )
             else:
                 await bot.send_message(
                     user[0],
                     broadcast_content['text'],
-                    reply_markup=go_button  # Только кнопка GO под сообщением
+                    reply_markup=go_button
                 )
             success_count += 1
         except Exception as e:
@@ -338,8 +347,8 @@ async def broadcast_confirmation(call: types.CallbackQuery):
     )
     
     # Очищаем данные рассылки
-    if 'broadcast_content' in dp.data:
-        del dp.data['broadcast_content']
+    if 'broadcast_content' in temp_storage:
+        del temp_storage['broadcast_content']
     await call.answer()
 
 # Ловит только не команды (для обычных пользователей)
@@ -358,8 +367,6 @@ if __name__ == "__main__":
     if not ADMIN_IDS:
         print("⚠️ Предупреждение: ADMIN_IDS не указан в .env файле!")
     
-    # Инициализируем словарь для хранения временных данных
-    dp.data = {}
     print("🚀 Бот запущен")
     print(f"👥 Администраторы: {ADMIN_IDS}")
     print(f"🌐 Web App URL: {WEB_APP_URL}")
