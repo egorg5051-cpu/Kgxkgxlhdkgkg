@@ -76,16 +76,18 @@ def get_stats():
     conn.close()
     return total_users, today_active
 
-# Клавиатура администратора (только для админов)
+# Клавиатура администратора (Reply Keyboard - над клавиатурой)
 def get_admin_keyboard():
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(KeyboardButton("📊 Статистика"))
-    keyboard.add(KeyboardButton("📢 Сделать рассылку"))
-    keyboard.add(KeyboardButton("🔙 Назад"))
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    keyboard.add(
+        KeyboardButton("📊 Статистика"),
+        KeyboardButton("📢 Сделать рассылку")
+    )
+    keyboard.add(KeyboardButton("🔙 Выйти из админ-панели"))
     return keyboard
 
-# Клавиатура для обычных пользователей (с кнопкой Go)
-def get_user_keyboard():
+# Inline кнопка GO (под сообщением) - ТОЛЬКО GO, никаких других кнопок
+def get_go_button():
     keyboard = InlineKeyboardMarkup()
     keyboard.add(
         InlineKeyboardButton(
@@ -110,39 +112,15 @@ async def send_start(message: types.Message):
     # Обновляем активность
     update_activity(message.from_user.id)
 
-    # Для админов показываем доп. кнопку
-    if is_admin(message.from_user.id):
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(
-            InlineKeyboardButton(
-                text="🎮 GO",
-                web_app=WebAppInfo(url=WEB_APP_URL)
-            )
-        )
-        keyboard.add(
-            InlineKeyboardButton(
-                text="👑 Админ-панель",
-                callback_data="admin_panel"
-            )
-        )
-        
-        await message.answer(
-            f"""👋 Привет, {name}!
+    # Отправляем сообщение с inline-кнопкой GO
+    await message.answer(
+        f"""👋 Привет, {name}!
 
 Нажми на кнопку ниже, чтобы испытать удачу и выиграть редкие подарки Telegram
 
 /terms - условия использования""",
-            reply_markup=keyboard
-        )
-    else:
-        await message.answer(
-            f"""👋 Привет, {name}!
-
-Нажми на кнопку ниже, чтобы испытать удачу и выиграть редкие подарки Telegram
-
-/terms - условия использования""",
-            reply_markup=get_user_keyboard()
-        )
+        reply_markup=get_go_button()
+    )
 
 # /start
 @dp.message_handler(commands=['start'])
@@ -156,13 +134,13 @@ async def terms(message: types.Message):
     keyboard.add(
         InlineKeyboardButton(
             text="📄 Политика конфиденциальности",
-            url=f"{WEB_APP_URL}/privacy" if WEB_APP_URL != "https://твой-сайт.com" else "https://твой-сайт.com/privacy"
+            url=f"{WEB_APP_URL}/privacy"
         )
     )
     keyboard.add(
         InlineKeyboardButton(
             text="📄 Условия использования",
-            url=f"{WEB_APP_URL}/terms" if WEB_APP_URL != "https://твой-сайт.com" else "https://твой-сайт.com/terms"
+            url=f"{WEB_APP_URL}/terms"
         )
     )
 
@@ -170,26 +148,6 @@ async def terms(message: types.Message):
         "Ознакомьтесь с условиями использования нашего приложения прежде чем продолжить.",
         reply_markup=keyboard
     )
-
-# Обработка кнопки админ-панели
-@dp.callback_query_handler(lambda call: call.data == "admin_panel")
-async def admin_panel_callback(call: types.CallbackQuery):
-    if not is_admin(call.from_user.id):
-        await call.answer("⛔ У вас нет доступа к админ-панели!", show_alert=True)
-        return
-    
-    total_users, today_active = get_stats()
-    
-    await call.message.answer(
-        f"👑 **Админ-панель**\n\n"
-        f"📊 **Статистика:**\n"
-        f"👥 Всего пользователей: {total_users}\n"
-        f"🌟 Активны сегодня: {today_active}\n\n"
-        f"Выберите действие:",
-        reply_markup=get_admin_keyboard(),
-        parse_mode="Markdown"
-    )
-    await call.answer()
 
 # /admin - команда для входа в админ-панель
 @dp.message_handler(commands=['admin'])
@@ -210,12 +168,11 @@ async def admin_panel(message: types.Message):
         parse_mode="Markdown"
     )
 
-# Обработка кнопок админ-панели
-@dp.message_handler(lambda message: message.text in ["📊 Статистика", "📢 Сделать рассылку", "🔙 Назад"])
+# Обработка кнопок админ-панели (Reply Keyboard)
+@dp.message_handler(lambda message: message.text in ["📊 Статистика", "📢 Сделать рассылку", "🔙 Выйти из админ-панели"])
 async def admin_buttons(message: types.Message):
     # Проверяем, админ ли пользователь
     if not is_admin(message.from_user.id):
-        # Если не админ, просто игнорируем или показываем обычное меню
         await send_start(message)
         return
     
@@ -243,16 +200,20 @@ async def admin_buttons(message: types.Message):
         await message.answer(
             "📢 **Режим рассылки**\n\n"
             "Отправьте мне фото с подписью или просто текст для рассылки.\n"
+            "Кнопка **GO** будет автоматически добавлена внизу сообщения.\n\n"
             "После отправки я попрошу подтверждение.\n\n"
-            "Для отмены нажмите 🔙 Назад",
+            "Для выхода из режима рассылки нажмите 🔙 Выйти из админ-панели",
             parse_mode="Markdown",
             reply_markup=get_admin_keyboard()
         )
         # Устанавливаем состояние ожидания рассылки
         dp.data['waiting_for_broadcast'] = message.from_user.id
     
-    elif message.text == "🔙 Назад":
-        await message.answer("🔙 Вы вышли из админ-панели", reply_markup=types.ReplyKeyboardRemove())
+    elif message.text == "🔙 Выйти из админ-панели":
+        await message.answer(
+            "🔙 Вы вышли из админ-панели",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
         await send_start(message)
 
 # Обработка рассылки (фото + текст или просто текст)
@@ -280,28 +241,38 @@ async def handle_broadcast(message: types.Message):
     # Сохраняем в dp.data
     dp.data['broadcast_content'] = broadcast_content
     
-    # Кнопка GO для рассылки
-    keyboard = get_user_keyboard()
+    # Показываем превью с inline-кнопками подтверждения
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton("✅ Отправить", callback_data="confirm_broadcast"),
+        InlineKeyboardButton("❌ Отмена", callback_data="cancel_broadcast")
+    )
     
-    # Показываем превью
+    # Показываем превью того, как будет выглядеть рассылка
     if broadcast_content['type'] == 'photo':
+        # Сначала показываем как будет выглядеть сообщение с кнопкой GO
         await message.answer_photo(
             broadcast_content['photo'],
-            caption=f"📢 **Превью рассылки:**\n\n{broadcast_content['caption']}\n\n✅ Отправить всем пользователям?",
-            reply_markup=InlineKeyboardMarkup().add(
-                InlineKeyboardButton("✅ Отправить", callback_data="confirm_broadcast"),
-                InlineKeyboardButton("❌ Отмена", callback_data="cancel_broadcast")
-            ),
+            caption=f"📢 **Превью рассылки:**\n\n{broadcast_content['caption']}\n\n⬇️ Внизу будет кнопка GO ⬇️",
+            reply_markup=get_go_button(),
             parse_mode="Markdown"
         )
-    else:
+        # Затем спрашиваем подтверждение
         await message.answer(
-            f"📢 **Превью рассылки:**\n\n{broadcast_content['text']}\n\n✅ Отправить всем пользователям?",
-            reply_markup=InlineKeyboardMarkup().add(
-                InlineKeyboardButton("✅ Отправить", callback_data="confirm_broadcast"),
-                InlineKeyboardButton("❌ Отмена", callback_data="cancel_broadcast")
-            ),
+            "✅ Отправить эту рассылку всем пользователям?",
+            reply_markup=keyboard
+        )
+    else:
+        # Сначала показываем как будет выглядеть сообщение с кнопкой GO
+        await message.answer(
+            f"📢 **Превью рассылки:**\n\n{broadcast_content['text']}\n\n⬇️ Внизу будет кнопка GO ⬇️",
+            reply_markup=get_go_button(),
             parse_mode="Markdown"
+        )
+        # Затем спрашиваем подтверждение
+        await message.answer(
+            "✅ Отправить эту рассылку всем пользователям?",
+            reply_markup=keyboard
         )
     
     # Удаляем состояние ожидания
@@ -332,8 +303,8 @@ async def broadcast_confirmation(call: types.CallbackQuery):
         await call.message.edit_text("❌ Ошибка: контент для рассылки не найден")
         return
     
-    # Кнопка GO для рассылки
-    keyboard = get_user_keyboard()
+    # Кнопка GO для рассылки (ТОЛЬКО GO, как на скриншоте)
+    go_button = get_go_button()
     
     # Отправляем рассылку
     success_count = 0
@@ -344,23 +315,26 @@ async def broadcast_confirmation(call: types.CallbackQuery):
                     user[0],
                     broadcast_content['photo'],
                     caption=broadcast_content['caption'],
-                    reply_markup=keyboard
+                    reply_markup=go_button  # Только кнопка GO под сообщением
                 )
             else:
                 await bot.send_message(
                     user[0],
                     broadcast_content['text'],
-                    reply_markup=keyboard
+                    reply_markup=go_button  # Только кнопка GO под сообщением
                 )
             success_count += 1
         except Exception as e:
             print(f"Ошибка отправки пользователю {user[0]}: {e}")
     
+    # Сообщаем админу о результате
     await call.message.edit_text(
-        f"✅ Рассылка завершена!\n\n"
-        f"📊 Статистика:\n"
+        f"✅ **Рассылка завершена!**\n\n"
+        f"📊 **Статистика:**\n"
         f"👥 Отправлено: {success_count}/{len(users)}\n"
-        f"❌ Ошибок: {len(users) - success_count}"
+        f"❌ Ошибок: {len(users) - success_count}\n\n"
+        f"🎮 Кнопка GO была добавлена к каждому сообщению",
+        parse_mode="Markdown"
     )
     
     # Очищаем данные рассылки
@@ -369,7 +343,7 @@ async def broadcast_confirmation(call: types.CallbackQuery):
     await call.answer()
 
 # Ловит только не команды (для обычных пользователей)
-@dp.message_handler(lambda message: not message.text.startswith('/') and message.text not in ["📊 Статистика", "📢 Сделать рассылку", "🔙 Назад"])
+@dp.message_handler(lambda message: not message.text.startswith('/') and message.text not in ["📊 Статистика", "📢 Сделать рассылку", "🔙 Выйти из админ-панели"])
 async def all_messages(message: types.Message):
     # Обновляем активность пользователя
     update_activity(message.from_user.id)
